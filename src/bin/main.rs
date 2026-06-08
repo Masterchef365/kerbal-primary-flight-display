@@ -40,7 +40,14 @@ use micromath::F32Ext;
 
 const WIDTH: usize = 320;
 const HEIGHT: usize = 240;
-const TILE_SIZE: usize = 20;
+const TILE_SIZE: usize = 10;
+
+const FB_SCALE: usize = 3;
+//const WIDTH_DIV: usize = ((WIDTH-1) / FB_SCALE) + 1;
+//const HEIGHT_DIV: usize = ((HEIGHT-1) / FB_SCALE) + 1;
+
+const WIDTH_DIV: usize = WIDTH.div_ceil(FB_SCALE);
+const HEIGHT_DIV: usize = HEIGHT.div_ceil(FB_SCALE);
 
 /*
 #[panic_handler]
@@ -51,7 +58,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 */
 
-extern crate alloc;
+//extern crate alloc;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -86,7 +93,7 @@ fn main() -> ! {
     let _ = peripherals.GPIO16;
     let _ = peripherals.GPIO20;
 
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 98768);
+    //esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 98768);
 
     let config = OutputConfig::default();
 
@@ -131,9 +138,9 @@ fn main() -> ! {
         Rgb565,
         _,
         LittleEndian,
-        WIDTH,
-        HEIGHT,
-        { buffer_size::<Rgb565>(WIDTH, HEIGHT) },
+        WIDTH_DIV,
+        HEIGHT_DIV,
+        { buffer_size::<Rgb565>(WIDTH_DIV, HEIGHT_DIV) },
     >::new();
 
     let mut back_buffer = Framebuffer::<
@@ -150,22 +157,29 @@ fn main() -> ! {
     let size = Size::new(WIDTH as _, HEIGHT as _);
     let rect = Rectangle::new(Point::zero(), size);
 
+
     loop {
+        let start = Instant::now();
+
         let iter = (0..HEIGHT)
-            .map(|y| (0..HEIGHT).map(move |x| fragment(x, y, time)))
+            .map(|y| (0..WIDTH).map(move |x| fragment(x, y, time)))
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
 
         let s = TILE_SIZE;
         for yi in (0..HEIGHT).step_by(s) {
             for xi in (0..WIDTH).step_by(s) {
+                let ymax = (yi + s).min(HEIGHT);
+                let xmax = (xi + s).min(WIDTH);
                 {
                     let back_buffer = &back_buffer;
                     let front_buffer = &front_buffer;
-                    if (yi..yi + s).all(|y| {
-                        (xi..xi + s).all(move |x| {
-                            back_buffer.pixel(Point::new(x as _, y as _))
-                                == front_buffer.pixel(Point::new(x as _, y as _))
+                    if (yi..ymax).all(|y| {
+                        (xi..xmax).all(move |x| {
+                            let back_px = back_buffer.pixel(Point::new(x as _, y as _)).unwrap();
+                            let front_px = front_buffer
+                                .pixel(Point::new((x / FB_SCALE) as _, (y / FB_SCALE) as _)).unwrap();
+                            front_px == back_px
                         })
                     }) {
                         continue;
@@ -174,9 +188,9 @@ fn main() -> ! {
 
                 {
                     let back_buffer = &back_buffer;
-                    let iter = (yi..yi + s)
+                    let iter = (yi..ymax)
                         .map(|y| {
-                            (xi..xi + s).map(move |x| {
+                            (xi..xmax).map(move |x| {
                                 let px: RawU16 = back_buffer
                                     .pixel(Point::new(x as _, y as _))
                                     .unwrap()
@@ -188,7 +202,13 @@ fn main() -> ! {
                         .flatten();
 
                     display
-                        .draw_raw_iter(xi as _, yi as _, TILE_SIZE as _, TILE_SIZE as _, iter)
+                        .draw_raw_iter(
+                            xi as _,
+                            yi as _,
+                            (xmax - 1) as _,
+                            (ymax - 1) as _,
+                            iter,
+                        )
                         .unwrap();
                 }
             }
@@ -196,7 +216,21 @@ fn main() -> ! {
 
         time += 1;
 
-        core::mem::swap(&mut front_buffer, &mut back_buffer);
+        for y in 0..HEIGHT_DIV {
+            for x in 0..WIDTH_DIV {
+                let c = back_buffer
+                    .pixel(Point::new((x * FB_SCALE) as _, (y * FB_SCALE) as _))
+                    .unwrap();
+                front_buffer.set_pixel(Point::new(x as _, y as _), c);
+            }
+        }
+
+        let elap = start.elapsed();
+        let ms = elap.as_millis();
+        let hz = 1000.0 / ms as f32;
+        esp_println::println!("{ms} ms = {hz} Hz hertz");
+
+        //display.clear(Rgb565::RED).unwrap();
     }
 }
 

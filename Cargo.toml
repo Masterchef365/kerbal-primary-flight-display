@@ -16,7 +16,6 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 
 critical-section = "1.2.0"
 
-esp-alloc        = "0.10.0"
 esp-println = { version = "0.17.0", features = ["esp32"] }
 esp-backtrace = { version = "0.19.0", features = ["esp32", "println", "panic-handler"] }
 
@@ -38,4 +37,5 @@ opt-level = "s"
 codegen-units = 1     # LLVM can perform better optimizations using a single thread
 debug         = 2     # prefer slower builds but better debugging experience
 lto           = 'fat'
-opt-level     = 's'
+#opt-level     = 's'
+opt-level     = 2
