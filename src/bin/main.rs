@@ -127,8 +127,6 @@ fn main() -> ! {
 
     display.clear(Rgb565::RED).unwrap();
 
-    panic!("Frick");
-
     let mut front_buffer = Framebuffer::<
         Rgb565,
         _,
