@@ -248,8 +248,8 @@ fn main() -> ! {
 }
 
 fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32) -> Rgb565 {
-    let x = (x as f32 / WIDTH as f32) * 2.0 - 1.0;
-    let y = (y as f32 / HEIGHT as f32) * 2.0 - 1.0;
+    let x = x as f32 - WIDTH as f32 / 2.0;
+    let y = y as f32 - HEIGHT as f32 / 2.0;
 
     if -x * roll_sin < y * roll_cos + pitch / FOV_Y {
         Rgb565::from(RawU16::from(COLOR_SKY))
