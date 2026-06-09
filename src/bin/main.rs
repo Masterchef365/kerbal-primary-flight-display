@@ -42,13 +42,6 @@ const WIDTH: usize = 320;
 const HEIGHT: usize = 240;
 const TILE_SIZE: usize = 10;
 
-const FB_SCALE: usize = 3;
-//const WIDTH_DIV: usize = ((WIDTH-1) / FB_SCALE) + 1;
-//const HEIGHT_DIV: usize = ((HEIGHT-1) / FB_SCALE) + 1;
-
-const WIDTH_DIV: usize = WIDTH.div_ceil(FB_SCALE);
-const HEIGHT_DIV: usize = HEIGHT.div_ceil(FB_SCALE);
-
 /*
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -58,7 +51,9 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 */
 
-//extern crate alloc;
+extern crate alloc;
+
+use alloc::boxed::Box;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -76,30 +71,14 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // The following pins are used to bootstrap the chip. They are available
-    // for use, but check the datasheet of the module for more information on them.
-    // - GPIO0
-    // - GPIO2
-    // - GPIO5
-    // - GPIO12
-    // - GPIO15
-    // These GPIO pins are in use by some feature of the module and should not be used.
-    let _ = peripherals.GPIO6;
-    let _ = peripherals.GPIO7;
-    let _ = peripherals.GPIO8;
-    let _ = peripherals.GPIO9;
-    let _ = peripherals.GPIO10;
-    let _ = peripherals.GPIO11;
-    let _ = peripherals.GPIO16;
-    let _ = peripherals.GPIO20;
-
     //esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 98768);
+    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
 
     let config = OutputConfig::default();
 
-    let mosi = Output::new(peripherals.GPIO23, Level::Low, config);
-    let miso = Input::new(peripherals.GPIO19, InputConfig::default());
-    let sck = Output::new(peripherals.GPIO18, Level::Low, config);
+    let mosi = Output::new(peripherals.GPIO11, Level::Low, config);
+    let miso = Input::new(peripherals.GPIO12, InputConfig::default());
+    let sck = Output::new(peripherals.GPIO13, Level::Low, config);
 
     let mut spi = Spi::new(
         peripherals.SPI2,
@@ -114,7 +93,7 @@ fn main() -> ! {
 
     let mut delay = esp_hal::delay::Delay::new();
 
-    let dc = Output::new(peripherals.GPIO21, Level::Low, config);
+    let dc = Output::new(peripherals.GPIO17, Level::Low, config);
     let cs = Output::new(peripherals.GPIO16, Level::Low, config);
 
     let reset_gpio = Output::new(peripherals.GPIO5, Level::Low, config); // Unused
@@ -134,14 +113,14 @@ fn main() -> ! {
 
     display.clear(Rgb565::RED).unwrap();
 
-    let mut front_buffer = Framebuffer::<
+    let mut front_buffer = Box::new(Framebuffer::<
         Rgb565,
         _,
         LittleEndian,
-        WIDTH_DIV,
-        HEIGHT_DIV,
-        { buffer_size::<Rgb565>(WIDTH_DIV, HEIGHT_DIV) },
-    >::new();
+        WIDTH,
+        HEIGHT,
+        { buffer_size::<Rgb565>(WIDTH, HEIGHT) },
+    >::new());
 
     let mut back_buffer = Framebuffer::<
         Rgb565,
@@ -178,7 +157,7 @@ fn main() -> ! {
                         (xi..xmax).all(move |x| {
                             let back_px = back_buffer.pixel(Point::new(x as _, y as _)).unwrap();
                             let front_px = front_buffer
-                                .pixel(Point::new((x / FB_SCALE) as _, (y / FB_SCALE) as _)).unwrap();
+                                .pixel(Point::new(x as _, y as _)).unwrap();
                             front_px == back_px
                         })
                     }) {
@@ -216,10 +195,10 @@ fn main() -> ! {
 
         time += 1;
 
-        for y in 0..HEIGHT_DIV {
-            for x in 0..WIDTH_DIV {
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
                 let c = back_buffer
-                    .pixel(Point::new((x * FB_SCALE) as _, (y * FB_SCALE) as _))
+                    .pixel(Point::new(x as _, y as _))
                     .unwrap();
                 front_buffer.set_pixel(Point::new(x as _, y as _), c);
             }
