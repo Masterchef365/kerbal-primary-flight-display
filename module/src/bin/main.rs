@@ -10,15 +10,20 @@
 extern crate alloc;
 
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use display_interface_spi::SPIInterface;
 use embedded_graphics::framebuffer::buffer_size;
 use embedded_graphics::framebuffer::Framebuffer;
 use embedded_graphics::image::GetPixel;
 use embedded_graphics::image::ImageRawLE;
+use embedded_graphics::mono_font::MonoTextStyle;
+use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::pixelcolor::raw::LittleEndian;
 use embedded_graphics::pixelcolor::raw::RawU16;
 use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::text::Alignment;
+use embedded_graphics::text::Text;
 use embedded_graphics::{
     prelude::*,
     primitives::{Line, PrimitiveStyle},
@@ -44,7 +49,7 @@ use ili9341::Orientation;
 use micromath::F32Ext;
 
 /// Degrees of FOV in the Y direction
-const FOV_Y: f32 = 60.0;
+const FOV_Y: f32 = 30.0;
 /// Degrees of FOV in the X direction
 const FOV_X: f32 = FOV_Y * WIDTH as f32 / HEIGHT as f32;
 
@@ -111,7 +116,7 @@ fn main() -> ! {
         iface,
         reset_gpio,
         &mut delay,
-        Orientation::Landscape,
+        Orientation::LandscapeFlipped,
         ili9341::DisplaySize240x320,
     )
     .unwrap();
@@ -149,6 +154,8 @@ fn main() -> ! {
 
     let mut current_state: DisplayState = DisplayState::default();
 
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+
     loop {
         let frame_start = Instant::now();
 
@@ -177,8 +184,49 @@ fn main() -> ! {
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
 
-        for i in (-90..=90).step_by(10) {
-            project_line(i as f32 - current_state.pitch, 70.0, current_state.roll)
+        for pitch_line in (-85_i32..=85).step_by(5) {
+            let width = if pitch_line == 0 {
+                30.0
+            } else {
+                if pitch_line % 20 == 0 {
+                    15.0
+                } else {
+                    if pitch_line % 10 == 0 {
+                        10.0
+                    } else {
+                        7.0
+                    }
+
+                }
+            };
+
+            let line = project_line(pitch_line as f32 + current_state.pitch, width, current_state.roll);
+
+
+            if pitch_line % 10 == 0 {
+                let text = pitch_line.abs().to_string();
+
+                Text::with_alignment(
+                    &text,
+                    line.start,
+                    style,
+                    Alignment::Right,
+                )
+                .draw(&mut back_buffer)
+                .unwrap();
+
+                Text::with_alignment(
+                    &text,
+                    line.end,
+                    style,
+                    Alignment::Left,
+                )
+                .draw(&mut back_buffer);
+
+
+            }
+
+            line
                 .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 2))
                 .draw(&mut back_buffer)
                 .unwrap();
@@ -252,7 +300,7 @@ fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32)
     let y = y as f32 - HEIGHT as f32 / 2.0;
 
     let px_per_degree = HEIGHT as f32 / FOV_Y / 2.0;
-    if -x * roll_sin < y * roll_cos + pitch * px_per_degree {
+    if -x * roll_sin > y * roll_cos - pitch * px_per_degree {
         Rgb565::from(RawU16::from(COLOR_SKY))
     } else {
         Rgb565::from(RawU16::from(COLOR_GROUND))
