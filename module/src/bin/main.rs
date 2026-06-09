@@ -300,7 +300,19 @@ fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32)
     let y = y as f32 - HEIGHT as f32 / 2.0;
 
     let px_per_degree = HEIGHT as f32 / FOV_Y / 2.0;
-    if -x * roll_sin > y * roll_cos - pitch * px_per_degree {
+    let xe = -x * roll_sin;
+    let ye = y * roll_cos;
+    let pitch_component = pitch * px_per_degree;
+
+    let outside = x*x + y*y > (WIDTH.min(HEIGHT)/2).pow(2) as f32;
+
+    let shade = if outside {
+        xe > ye
+    } else {
+        xe > ye - pitch_component
+    };
+
+    if shade {
         Rgb565::from(RawU16::from(COLOR_SKY))
     } else {
         Rgb565::from(RawU16::from(COLOR_GROUND))
