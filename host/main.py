@@ -2,6 +2,7 @@ import krpc
 import time
 import serial
 import json
+import struct
 
 conn = krpc.connect(
     name='RustPFD',
@@ -10,7 +11,7 @@ conn = krpc.connect(
     stream_port=50001
 )
 
-ser = serial.Serial("/dev/ttyACM0", baudrate=115200, timeout=0.1)
+ser = serial.Serial("/dev/ttyACM0", baudrate=115200)
 
 vessel = conn.space_center.active_vessel
 flight_info = vessel.flight()
@@ -21,17 +22,21 @@ speed = conn.add_stream(getattr, flight_info, 'speed')
 heading = conn.add_stream(getattr, flight_info, 'heading')
 
 while True:
-    data = {
-        "pitch": pitch(),
-        "roll": roll(),
-        "altitude": altitude(),
-        "speed": speed(),
-        "heading": heading(),
-    }
+    bytes = struct.pack(
+        '4B5f',
+        0x00,
+        0x00,
+        0x00,
+        0xff,
+        pitch(),
+        roll(),
+        altitude(),
+        speed(),
+        heading()
+    )
 
     now = time.time()
-    s = json.dumps(data) + '\n'
-    ser.write(s.encode('utf-8'))
+    ser.write(bytes)
 
     try:
         print(ser.read_all().decode('utf-8'))

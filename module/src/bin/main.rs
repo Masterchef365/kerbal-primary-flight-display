@@ -10,6 +10,7 @@
 extern crate alloc;
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use display_interface_spi::SPIInterface;
 use embedded_graphics::framebuffer::buffer_size;
 use embedded_graphics::framebuffer::Framebuffer;
@@ -52,7 +53,7 @@ const WIDTH: usize = 320;
 /// Screen height
 const HEIGHT: usize = 240;
 
-/// TFT Display update tile size 
+/// TFT Display update tile size
 const TILE_SIZE: usize = 10;
 
 // Colors
@@ -144,26 +145,24 @@ fn main() -> ! {
 
     // Runtime variables
     let mut time = 0;
-    let mut parser = MessageStreamParser::new();
+    let mut parser = MessageStreamParser::new(4 * 5);
 
     let mut current_state: DisplayState = DisplayState::default();
 
     loop {
         let frame_start = Instant::now();
-        
+
         // Parse USB messages
         while let Ok(byte) = usb.read_byte() {
-            if byte == 0x00 {
-                continue;
-            }
             if let Some(s) = parser.step(byte) {
-                //let start = Instant::now();
-                match serde_json::from_str::<DisplayState>(&s) {
-                    Err(e) => esp_println::println!("Parsing error: {e}"),
+                let start = Instant::now();
+                esp_println::println!("Bytes: {s:?}");
+                match DisplayState::parse(s) {
+                    Err(e) => esp_println::println!("Parsing error"),
                     Ok(state) => {
-                        //esp_println::println!("Deser time: {} us", start.elapsed().as_micros());
+                        esp_println::println!("Deser time: {} us", start.elapsed().as_micros());
                         current_state = state
-                    },
+                    }
                 }
             }
         }
@@ -172,7 +171,10 @@ fn main() -> ! {
         let (roll_sin, roll_cos) = current_state.roll.to_radians().sin_cos();
 
         let iter = (0..HEIGHT)
-            .map(|y| (0..WIDTH).map(move |x| background_fill(x, y, current_state.pitch, roll_sin, roll_cos)))
+            .map(|y| {
+                (0..WIDTH)
+                    .map(move |x| background_fill(x, y, current_state.pitch, roll_sin, roll_cos))
+            })
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
 
@@ -189,8 +191,7 @@ fn main() -> ! {
                     if (yi..ymax).all(|y| {
                         (xi..xmax).all(move |x| {
                             let back_px = back_buffer.pixel(Point::new(x as _, y as _)).unwrap();
-                            let front_px = front_buffer
-                                .pixel(Point::new(x as _, y as _)).unwrap();
+                            let front_px = front_buffer.pixel(Point::new(x as _, y as _)).unwrap();
                             front_px == back_px
                         })
                     }) {
@@ -215,21 +216,13 @@ fn main() -> ! {
                         .flatten();
 
                     display
-                        .draw_raw_iter(
-                            xi as _,
-                            yi as _,
-                            (xmax - 1) as _,
-                            (ymax - 1) as _,
-                            iter,
-                        )
+                        .draw_raw_iter(xi as _, yi as _, (xmax - 1) as _, (ymax - 1) as _, iter)
                         .unwrap();
 
                     // Remember the change
                     for y in yi..ymax {
                         for x in xi..xmax {
-                            let c = back_buffer
-                                .pixel(Point::new(x as _, y as _))
-                                .unwrap();
+                            let c = back_buffer.pixel(Point::new(x as _, y as _)).unwrap();
                             front_buffer.set_pixel(Point::new(x as _, y as _), c);
                         }
                     }
@@ -261,26 +254,41 @@ fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32)
 }
 
 struct MessageStreamParser {
-    current_message: String,
+    current_message: Vec<u8>,
+    seek: bool,
+    msg_len: usize,
 }
 
 impl MessageStreamParser {
-    pub fn new() -> Self {
-        Self { current_message: String::new() }
+    pub fn new(msg_len: usize) -> Self {
+        Self {
+            current_message: Vec::new(),
+            seek: true,
+            msg_len,
+        }
     }
 
-    pub fn step(&mut self, byte: u8) -> Option<String> {
-        if byte == b'\n' {
-            Some(core::mem::take(&mut self.current_message))
-        } else {
-            self.current_message.push(byte as char);
+    pub fn step(&mut self, byte: u8) -> Option<Vec<u8>> {
+        self.current_message.push(byte);
+
+        if self.seek {
+            if self.current_message.ends_with(&[0x00, 0x00, 0x00, 0xff]) {
+                self.seek = false;
+                self.current_message.clear();
+            }
             None
+        } else {
+            if self.current_message.len() == self.msg_len {
+                self.seek = true;
+                Some(core::mem::take(&mut self.current_message))
+            } else {
+                None
+            }
         }
     }
 }
 
-#[derive(Copy, Clone)]
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DisplayState {
     /// Pitch (degrees)
     pub pitch: f32,
@@ -296,4 +304,25 @@ pub struct DisplayState {
     // pub target_pitch: f32,
     // /// Target yaw difference (degrees)
     // pub target_yaw: f32,
+}
+
+impl DisplayState {
+    pub fn parse(bytes: Vec<u8>) -> Result<Self, ()> {
+        Ok(Self {
+            pitch: read_f32(&bytes[0..4]),
+            roll: read_f32(&bytes[4..8]),
+            altitude: read_f32(&bytes[8..12]),
+            speed: read_f32(&bytes[12..16]),
+            heading: read_f32(&bytes[16..20]),
+        })
+    }
+}
+
+fn read_f32(values: &[u8]) -> f32 {
+    f32::from_le_bytes([
+        values[0],
+        values[1],
+        values[2],
+        values[3],
+    ])
 }
