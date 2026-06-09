@@ -42,7 +42,7 @@ while True:
         print(ser.read_all().decode('utf-8'))
     except:
         pass
-    print("TIME: ", time.time() - now)
+    #print("TIME: ", time.time() - now)
 
     time.sleep(0.1)
 

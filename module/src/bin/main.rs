@@ -44,7 +44,7 @@ use ili9341::Orientation;
 use micromath::F32Ext;
 
 /// Degrees of FOV in the Y direction
-const FOV_Y: f32 = 30.0;
+const FOV_Y: f32 = 60.0;
 /// Degrees of FOV in the X direction
 const FOV_X: f32 = FOV_Y * WIDTH as f32 / HEIGHT as f32;
 
@@ -156,11 +156,10 @@ fn main() -> ! {
         while let Ok(byte) = usb.read_byte() {
             if let Some(s) = parser.step(byte) {
                 let start = Instant::now();
-                esp_println::println!("Bytes: {s:?}");
                 match DisplayState::parse(s) {
                     Err(e) => esp_println::println!("Parsing error"),
                     Ok(state) => {
-                        esp_println::println!("Deser time: {} us", start.elapsed().as_micros());
+                        //esp_println::println!("Deser time: {} us", start.elapsed().as_micros());
                         current_state = state
                     }
                 }
@@ -177,6 +176,13 @@ fn main() -> ! {
             })
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
+
+        for i in (-90..=90).step_by(10) {
+            project_line(i as f32 - current_state.pitch, 70.0, current_state.roll)
+                .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 2))
+                .draw(&mut back_buffer)
+                .unwrap();
+        }
 
         // Draw only those tiles which changed
         let s = TILE_SIZE;
@@ -235,8 +241,7 @@ fn main() -> ! {
         let elap = frame_start.elapsed();
         let ms = elap.as_millis();
         let hz = 1000.0 / ms as f32;
-
-        //esp_println::println!("{ms} ms = {hz} Hz hertz");
+        //esp_println::println!("{ms} ms = {hz} Hz");
 
         //display.clear(Rgb565::RED).unwrap();
     }
@@ -325,4 +330,22 @@ fn read_f32(values: &[u8]) -> f32 {
         values[2],
         values[3],
     ])
+}
+
+fn project_relative_point(rel_pitch: f32, rel_yaw: f32, roll: f32) -> Point {
+    let px_per_degree = HEIGHT as f32 / FOV_Y / 2.0;
+    let dy = rel_pitch * px_per_degree;
+    let dx = rel_yaw * px_per_degree;
+    let (sin, cos) = roll.to_radians().sin_cos();
+    Point::new(
+        (dy * sin + dx * cos) as i32 + WIDTH as i32 / 2,
+        (dy * cos - dx * sin) as i32 + HEIGHT as i32 / 2,
+    )
+}
+
+fn project_line(rel_pitch: f32, size: f32, roll: f32) -> Line {
+    Line::new(
+        project_relative_point(rel_pitch, -size, roll),
+        project_relative_point(rel_pitch, size, roll),
+    )
 }
