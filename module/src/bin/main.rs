@@ -149,24 +149,24 @@ fn main() -> ! {
     let mut current_state: DisplayState = DisplayState::default();
 
     loop {
-        let start = Instant::now();
+        let frame_start = Instant::now();
         
         // Parse USB messages
-        let mut n = 1;
         while let Ok(byte) = usb.read_byte() {
+            if byte == 0x00 {
+                continue;
+            }
             if let Some(s) = parser.step(byte) {
-                let start = Instant::now();
+                //let start = Instant::now();
                 match serde_json::from_str::<DisplayState>(&s) {
                     Err(e) => esp_println::println!("Parsing error: {e}"),
                     Ok(state) => {
-                        esp_println::println!("Deser time: {}s", start.elapsed().as_secs());
+                        //esp_println::println!("Deser time: {} us", start.elapsed().as_micros());
                         current_state = state
                     },
                 }
             }
-            n += 1;
         }
-        esp_println::println!("Unser N = {n}");
 
         // Draw display
         let (roll_sin, roll_cos) = current_state.roll.to_radians().sin_cos();
@@ -239,7 +239,7 @@ fn main() -> ! {
 
         time += 1;
 
-        let elap = start.elapsed();
+        let elap = frame_start.elapsed();
         let ms = elap.as_millis();
         let hz = 1000.0 / ms as f32;
 

@@ -30,8 +30,8 @@ while True:
     }
 
     now = time.time()
-    ser.write(json.dumps(data).encode('utf-8'))
-    ser.write(b'\n')
+    s = json.dumps(data) + '\n'
+    ser.write(s.encode('utf-8'))
 
     try:
         print(ser.read_all().decode('utf-8'))
@@ -39,5 +39,5 @@ while True:
         pass
     print("TIME: ", time.time() - now)
 
-    time.sleep(1)
+    time.sleep(0.1)
 
