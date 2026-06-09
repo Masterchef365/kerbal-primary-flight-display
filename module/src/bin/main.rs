@@ -7,6 +7,9 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+extern crate alloc;
+
+use alloc::string::String;
 use display_interface_spi::SPIInterface;
 use embedded_graphics::framebuffer::buffer_size;
 use embedded_graphics::framebuffer::Framebuffer;
@@ -34,24 +37,27 @@ use esp_hal::spi::{
 };
 use esp_hal::time::Rate;
 use esp_hal::time::{Duration, Instant};
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use ili9341::Ili9341;
 use ili9341::Orientation;
 use micromath::F32Ext;
 
+/// Degrees of FOV in the Y direction
+const FOV_Y: f32 = 30.0;
+/// Degrees of FOV in the X direction
+const FOV_X: f32 = FOV_Y * WIDTH as f32 / HEIGHT as f32;
+
+/// Screen width
 const WIDTH: usize = 320;
+/// Screen height
 const HEIGHT: usize = 240;
+
+/// TFT Display update tile size 
 const TILE_SIZE: usize = 10;
 
-/*
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    esp_println::println!("{info}");
-    esp_println::println!("{}", esp_alloc::HEAP.stats());
-    loop {}
-}
-*/
-
-extern crate alloc;
+// Colors
+const COLOR_SKY: u16 = 0b00000_111010_11111;
+const COLOR_GROUND: u16 = 0b10001_010010_00000;
 
 use alloc::boxed::Box;
 
@@ -65,15 +71,15 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[main]
 fn main() -> ! {
-    // generator version: 1.3.0
-    // generator parameters: --chip esp32 -o esp32-wroom-32 -o alloc -o neovim -o esp
-
+    // ESP-Hal setup
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    //esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 98768);
+    let mut delay = esp_hal::delay::Delay::new();
+
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
 
+    // TFT Display setup
     let config = OutputConfig::default();
 
     let mosi = Output::new(peripherals.GPIO11, Level::Low, config);
@@ -90,8 +96,6 @@ fn main() -> ! {
     .with_sck(sck)
     .with_mosi(mosi)
     .with_miso(miso);
-
-    let mut delay = esp_hal::delay::Delay::new();
 
     let dc = Output::new(peripherals.GPIO17, Level::Low, config);
     let cs = Output::new(peripherals.GPIO16, Level::Low, config);
@@ -131,17 +135,39 @@ fn main() -> ! {
         { buffer_size::<Rgb565>(WIDTH, HEIGHT) },
     >::new();
 
-    let mut time = 0;
-
     let size = Size::new(WIDTH as _, HEIGHT as _);
     let rect = Rectangle::new(Point::zero(), size);
 
+    // USB serial
+    let mut usb = UsbSerialJtag::new(peripherals.USB_DEVICE);
+    usb.listen_rx_packet_recv_interrupt();
+
+    // Runtime variables
+    let mut time = 0;
+    let mut parser = MessageStreamParser::new();
+
+    let mut current_state: DisplayState = DisplayState::default();
 
     loop {
         let start = Instant::now();
+        
+        current_state.roll += 0.02;
+
+        // Parse USB messages
+        while let Ok(byte) = usb.read_byte() {
+            if let Some(s) = parser.step(byte) {
+                match serde_json::from_str::<DisplayState>(&s) {
+                    Err(e) => esp_println::println!("Parsing error: {e}"),
+                    Ok(state) => current_state = state,
+                }
+            }
+        }
+
+        // Draw display
+        let (roll_sin, roll_cos) = current_state.roll.to_radians().sin_cos();
 
         let iter = (0..HEIGHT)
-            .map(|y| (0..WIDTH).map(move |x| fragment(x, y, time)))
+            .map(|y| (0..WIDTH).map(move |x| background_fill(x, y, current_state.pitch, roll_sin, roll_cos)))
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
 
@@ -211,20 +237,58 @@ fn main() -> ! {
         let elap = start.elapsed();
         let ms = elap.as_millis();
         let hz = 1000.0 / ms as f32;
-        esp_println::println!("{ms} ms = {hz} Hz hertz");
+
+        //esp_println::println!("{ms} ms = {hz} Hz hertz");
 
         //display.clear(Rgb565::RED).unwrap();
     }
 }
 
-fn fragment(x: usize, y: usize, time: usize) -> Rgb565 {
-    let x = x as f32 - 320.0 / 2.0;
-    let y = y as f32 - 240.0 / 2.0;
-    let t = time as f32 / 50.0;
+fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32) -> Rgb565 {
+    let x = (x as f32 / WIDTH as f32) * 2.0 - 1.0;
+    let y = (y as f32 / HEIGHT as f32) * 2.0 - 1.0;
 
-    if x * t.cos() < y * t.sin() {
-        Rgb565::from(RawU16::from(0b00000_111010_11111))
+    if x * roll_sin < y * roll_cos + pitch / FOV_Y {
+        Rgb565::from(RawU16::from(COLOR_SKY))
     } else {
-        Rgb565::from(RawU16::from(0b10001_010010_00000))
+        Rgb565::from(RawU16::from(COLOR_GROUND))
     }
+}
+
+struct MessageStreamParser {
+    current_message: String,
+}
+
+impl MessageStreamParser {
+    pub fn new() -> Self {
+        Self { current_message: String::new() }
+    }
+
+    pub fn step(&mut self, byte: u8) -> Option<String> {
+        if byte == b'\n' {
+            Some(core::mem::take(&mut self.current_message))
+        } else {
+            self.current_message.push(byte as char);
+            None
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct DisplayState {
+    /// Pitch (degrees)
+    pub pitch: f32,
+    /// Roll (degrees)
+    pub roll: f32,
+    /// Altitude (meters)
+    pub altitude: f32,
+    /// Velocity (meters per second)
+    pub speed: f32,
+    /// Heading (degrees)
+    pub heading: f32,
+    // /// Target pitch difference (degrees)
+    // pub target_pitch: f32,
+    // /// Target yaw difference (degrees)
+    // pub target_yaw: f32,
 }
