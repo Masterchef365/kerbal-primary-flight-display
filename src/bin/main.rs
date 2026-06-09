@@ -145,9 +145,11 @@ fn main() -> ! {
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
 
+        // Draw only those tiles which changed
         let s = TILE_SIZE;
         for yi in (0..HEIGHT).step_by(s) {
             for xi in (0..WIDTH).step_by(s) {
+                // Check if the tile matches
                 let ymax = (yi + s).min(HEIGHT);
                 let xmax = (xi + s).min(WIDTH);
                 {
@@ -165,6 +167,7 @@ fn main() -> ! {
                     }
                 }
 
+                // Otherwise draw it from the back buffer
                 {
                     let back_buffer = &back_buffer;
                     let iter = (yi..ymax)
@@ -189,20 +192,21 @@ fn main() -> ! {
                             iter,
                         )
                         .unwrap();
+
+                    // Remember the change
+                    for y in yi..ymax {
+                        for x in xi..xmax {
+                            let c = back_buffer
+                                .pixel(Point::new(x as _, y as _))
+                                .unwrap();
+                            front_buffer.set_pixel(Point::new(x as _, y as _), c);
+                        }
+                    }
                 }
             }
         }
 
         time += 1;
-
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let c = back_buffer
-                    .pixel(Point::new(x as _, y as _))
-                    .unwrap();
-                front_buffer.set_pixel(Point::new(x as _, y as _), c);
-            }
-        }
 
         let elap = start.elapsed();
         let ms = elap.as_millis();
