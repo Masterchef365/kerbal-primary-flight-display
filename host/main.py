@@ -10,7 +10,7 @@ conn = krpc.connect(
     stream_port=50001
 )
 
-ser = serial.Serial("/dev/ttyACM0", baudrate=921600, timeout=0.1)
+ser = serial.Serial("/dev/ttyACM0", baudrate=115200, timeout=0.1)
 
 vessel = conn.space_center.active_vessel
 flight_info = vessel.flight()
@@ -39,5 +39,5 @@ while True:
         pass
     print("TIME: ", time.time() - now)
 
-    #time.sleep(0.01)
+    time.sleep(1)
 

@@ -110,7 +110,7 @@ fn main() -> ! {
         iface,
         reset_gpio,
         &mut delay,
-        Orientation::LandscapeFlipped,
+        Orientation::Landscape,
         ili9341::DisplaySize240x320,
     )
     .unwrap();
@@ -139,7 +139,7 @@ fn main() -> ! {
     let rect = Rectangle::new(Point::zero(), size);
 
     // USB serial
-    let mut usb = UsbSerialJtag::new(peripherals.USB_DEVICE);
+    let mut usb = UsbSerialJtag::new(peripherals.USB_DEVICE).into_async();
     usb.listen_rx_packet_recv_interrupt();
 
     // Runtime variables
@@ -151,17 +151,22 @@ fn main() -> ! {
     loop {
         let start = Instant::now();
         
-        current_state.roll += 0.02;
-
         // Parse USB messages
+        let mut n = 1;
         while let Ok(byte) = usb.read_byte() {
             if let Some(s) = parser.step(byte) {
+                let start = Instant::now();
                 match serde_json::from_str::<DisplayState>(&s) {
                     Err(e) => esp_println::println!("Parsing error: {e}"),
-                    Ok(state) => current_state = state,
+                    Ok(state) => {
+                        esp_println::println!("Deser time: {}s", start.elapsed().as_secs());
+                        current_state = state
+                    },
                 }
             }
+            n += 1;
         }
+        esp_println::println!("Unser N = {n}");
 
         // Draw display
         let (roll_sin, roll_cos) = current_state.roll.to_radians().sin_cos();
@@ -248,7 +253,7 @@ fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32)
     let x = (x as f32 / WIDTH as f32) * 2.0 - 1.0;
     let y = (y as f32 / HEIGHT as f32) * 2.0 - 1.0;
 
-    if x * roll_sin < y * roll_cos + pitch / FOV_Y {
+    if -x * roll_sin < y * roll_cos + pitch / FOV_Y {
         Rgb565::from(RawU16::from(COLOR_SKY))
     } else {
         Rgb565::from(RawU16::from(COLOR_GROUND))
