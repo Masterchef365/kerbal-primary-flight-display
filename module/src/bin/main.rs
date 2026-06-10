@@ -286,6 +286,33 @@ fn main() -> ! {
             }
         }
 
+        // Altitude tape numbers
+        let (_, quant) = quant_bignumber(current_state.speed);
+        let unit = quant * 100.0;
+        let rounded_speed = (current_state.speed / unit).floor() * unit;
+        let remainder_speed = current_state.speed - rounded_speed;
+
+        let n: i32 = 2;
+        let total = n * 2 + 1;
+        let px_per_unit: f32 = speed_tape_sz.height as f32 / (total + 1) as f32 / unit;
+
+        for i in -n..=n {
+            let offset = i as f32 * unit;
+            let speed = offset + rounded_speed;
+
+            if speed < 0.0 {
+                continue;
+            }
+
+            let offset_y = ((offset - remainder_speed) * px_per_unit) as i32;
+            let text_pos = Point::new(speed_tape_tl.x, center.y - offset_y);
+            let text = format_bignumber(speed, true);
+            Text::with_alignment(&text, text_pos, large_style, Alignment::Center)
+                .draw(&mut back_buffer)
+                .unwrap();
+        }
+
+
         // Speed background
         let triangle_width = 5;
         let speed_bkg_sz = Size::new(speed_tape_sz.width - triangle_width, 22);
@@ -338,21 +365,24 @@ fn main() -> ! {
         // Altitude tape numbers
         let (_, quant) = quant_bignumber(current_state.altitude);
         let unit = quant * 100.0;
-        let rounded_alt = (current_state.altitude / unit).round() * unit;
-        let remainder_alt = current_state.altitude % unit;
+        let rounded_alt = (current_state.altitude / unit).floor() * unit;
+        let remainder_alt = current_state.altitude - rounded_alt;
 
         let n: i32 = 2;
         let total = n * 2 + 1;
-        let px_per_unit: f32 = alt_tape_sz.height as f32 / total as f32 / unit;
+        let px_per_unit: f32 = alt_tape_sz.height as f32 / (total + 1) as f32 / unit;
 
         for i in -n..=n {
-            let offset_alt = i as f32 * unit;
-            let combined_alt = rounded_alt + offset_alt;
-            if combined_alt < 0.0 {
+            let offset = i as f32 * unit;
+            let altitude = offset + rounded_alt;
+
+            if altitude < 0.0 {
                 continue;
             }
-            let text_pos = Point::new(alt_tape_tl.x, center.y - ((offset_alt - remainder_alt) * px_per_unit).floor() as i32);
-            let text = format_bignumber(combined_alt, true);
+
+            let offset_y = ((offset - remainder_alt) * px_per_unit) as i32;
+            let text_pos = Point::new(alt_tape_tl.x, center.y - offset_y);
+            let text = format_bignumber(altitude, true);
             Text::with_alignment(&text, text_pos, large_style, Alignment::Center)
                 .draw(&mut back_buffer)
                 .unwrap();
@@ -572,11 +602,14 @@ fn quant_bignumber(value: f32) -> (&'static str, f32) {
     }
 }
 
-fn format_bignumber(mut value: f32, round: bool) -> String {
+fn format_bignumber(mut value: f32, round_100: bool) -> String {
     let (unit, quant) = quant_bignumber(value);
+    let mut value = value / quant;
 
-    if round {
-        value = (value / quant / 100.0).floor() * 100.0;
+    if round_100 {
+        value = (value / 100.0).floor() * 100.0;
+    } else {
+        value = value.floor();
     }
-    format!("{value:5}{unit}")
+    format!("{:5}{unit}", value.floor())
 }
