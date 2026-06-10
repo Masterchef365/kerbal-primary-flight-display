@@ -17,11 +17,14 @@ use embedded_graphics::framebuffer::buffer_size;
 use embedded_graphics::framebuffer::Framebuffer;
 use embedded_graphics::image::GetPixel;
 use embedded_graphics::image::ImageRawLE;
-use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
+use embedded_graphics::mono_font::ascii::FONT_9X18_BOLD;
+use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::raw::LittleEndian;
 use embedded_graphics::pixelcolor::raw::RawU16;
 use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::primitives::StyledDrawable;
+use embedded_graphics::primitives::Triangle;
 use embedded_graphics::text::Alignment;
 use embedded_graphics::text::Text;
 use embedded_graphics::{
@@ -121,6 +124,7 @@ fn main() -> ! {
     )
     .unwrap();
 
+    // Show red on screen if there's an error during setup
     display.clear(Rgb565::RED).unwrap();
 
     let mut front_buffer = Box::new(Framebuffer::<
@@ -149,12 +153,16 @@ fn main() -> ! {
     usb.listen_rx_packet_recv_interrupt();
 
     // Runtime variables
-    let mut time = 0;
+    let mut frame_num = 0;
     let mut parser = MessageStreamParser::new(4 * 5);
 
     let mut current_state: DisplayState = DisplayState::default();
 
-    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    let small_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    let large_style = MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE);
+
+    // Clear black to match what the front buffer thinks it is
+    display.clear(Rgb565::BLACK).unwrap();
 
     loop {
         let frame_start = Instant::now();
@@ -173,7 +181,7 @@ fn main() -> ! {
             }
         }
 
-        // Draw display
+        // Draw background
         let (roll_sin, roll_cos) = current_state.roll.to_radians().sin_cos();
 
         let iter = (0..HEIGHT)
@@ -184,6 +192,7 @@ fn main() -> ! {
             .flatten();
         back_buffer.fill_contiguous(&rect, iter);
 
+        // Draw pitch lines
         for pitch_line in (-85_i32..=85).step_by(5) {
             let width = if pitch_line == 0 {
                 30.0
@@ -196,41 +205,138 @@ fn main() -> ! {
                     } else {
                         7.0
                     }
-
                 }
             };
 
-            let line = project_line(pitch_line as f32 + current_state.pitch, width, current_state.roll);
-
+            let line = project_line(
+                pitch_line as f32 + current_state.pitch,
+                width,
+                current_state.roll,
+            );
 
             if pitch_line % 10 == 0 {
                 let text = pitch_line.abs().to_string();
 
-                Text::with_alignment(
-                    &text,
-                    line.start,
-                    style,
-                    Alignment::Right,
-                )
-                .draw(&mut back_buffer)
-                .unwrap();
+                Text::with_alignment(&text, line.start, small_style, Alignment::Right)
+                    .draw(&mut back_buffer)
+                    .unwrap();
 
-                Text::with_alignment(
-                    &text,
-                    line.end,
-                    style,
-                    Alignment::Left,
-                )
-                .draw(&mut back_buffer);
-
-
+                Text::with_alignment(&text, line.end, small_style, Alignment::Left)
+                    .draw(&mut back_buffer);
             }
 
-            line
-                .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 2))
+            line.into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 2))
                 .draw(&mut back_buffer)
                 .unwrap();
         }
+
+        // Draw chevron
+        let center = Point::new(WIDTH as i32 / 2, HEIGHT as i32 / 2);
+        let chev_bottom = Point::new(center.x, center.y + 10);
+        let chev_left = Point::new(center.x - 30, center.y + 20);
+        let chev_right = Point::new(center.x + 30, center.y + 20);
+
+        Triangle::new(center, chev_bottom, chev_left)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::YELLOW))
+            .draw(&mut back_buffer)
+            .unwrap();
+
+        Triangle::new(center, chev_bottom, chev_right)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::YELLOW))
+            .draw(&mut back_buffer)
+            .unwrap();
+
+        // Speed tape background
+        let speed_tape_tl = Point::new(center.x - WIDTH as i32 / 3, center.y);
+        let speed_tape_sz = Size::new(WIDTH as u32 / 6, 5 * HEIGHT as u32 / 6);
+
+        let dark_rect = Rectangle::new(
+            Point::new(
+                speed_tape_tl.x - speed_tape_sz.width as i32 / 2,
+                speed_tape_tl.y - speed_tape_sz.height as i32 / 2,
+            ),
+            speed_tape_sz,
+        );
+        for p in dark_rect.points() {
+            if let Some(c) = back_buffer.pixel(p) {
+                back_buffer.set_pixel(p, Rgb565::new(c.r() / 2, c.g() / 2, c.b() / 2));
+            }
+        }
+
+        // Speed background
+        let triangle_width = 5;
+        let speed_bkg_sz = Size::new(speed_tape_sz.width, 22);
+        let black_rect = Rectangle::new(
+            Point::new(
+                speed_tape_tl.x - speed_bkg_sz.width as i32 / 2,
+                speed_tape_tl.y - speed_bkg_sz.height as i32 / 2,
+            ),
+            speed_bkg_sz,
+        );
+        black_rect
+            .draw_styled(&PrimitiveStyle::with_fill(Rgb565::BLACK), &mut back_buffer)
+            .unwrap();
+        
+        let br = black_rect.bottom_right().unwrap();
+        let tr = Point::new(br.x, black_rect.top_left.y);
+        let middle = Point::new(br.x + 5, (br.y + tr.y) / 2);
+
+        Triangle::new(br, tr, middle)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(&mut back_buffer)
+            .unwrap();
+
+        // Draw speed
+        let speed_text = current_state.speed.round().to_string();
+        Text::with_alignment(&speed_text, speed_tape_tl, large_style, Alignment::Center)
+            .draw(&mut back_buffer)
+            .unwrap();
+
+        // Altitude tape background
+        let alt_tape_tl = Point::new(center.x + WIDTH as i32 / 3, center.y);
+        let alt_tape_sz = Size::new(WIDTH as u32 / 6, 5 * HEIGHT as u32 / 6);
+
+        let dark_rect = Rectangle::new(
+            Point::new(
+                alt_tape_tl.x - alt_tape_sz.width as i32 / 2,
+                alt_tape_tl.y - alt_tape_sz.height as i32 / 2,
+            ),
+            alt_tape_sz,
+        );
+        for p in dark_rect.points() {
+            if let Some(c) = back_buffer.pixel(p) {
+                back_buffer.set_pixel(p, Rgb565::new(c.r() / 2, c.g() / 2, c.b() / 2));
+            }
+        }
+
+        // Altitude background
+        let alt_bkg_sz = Size::new(alt_tape_sz.width - triangle_width, 22);
+        let black_rect = Rectangle::new(
+            Point::new(
+                alt_tape_tl.x - alt_bkg_sz.width as i32 / 2,
+                alt_tape_tl.y - alt_bkg_sz.height as i32 / 2,
+            ),
+            alt_bkg_sz,
+        );
+        black_rect
+            .draw_styled(&PrimitiveStyle::with_fill(Rgb565::BLACK), &mut back_buffer)
+            .unwrap();
+        
+        let br = black_rect.bottom_right().unwrap();
+        let tr = Point::new(br.x, black_rect.top_left.y);
+        let middle = Point::new(br.x - 5, (br.y + tr.y) / 2);
+
+        Triangle::new(br, tr, middle)
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(&mut back_buffer)
+            .unwrap();
+
+        // Draw altitude
+        let alt_text = current_state.altitude.round().to_string();
+        Text::with_alignment(&alt_text, alt_tape_tl, large_style, Alignment::Right)
+            .draw(&mut back_buffer)
+            .unwrap();
+
 
         // Draw only those tiles which changed
         let s = TILE_SIZE;
@@ -284,7 +390,7 @@ fn main() -> ! {
             }
         }
 
-        time += 1;
+        frame_num += 1;
 
         let elap = frame_start.elapsed();
         let ms = elap.as_millis();
@@ -304,7 +410,7 @@ fn background_fill(x: usize, y: usize, pitch: f32, roll_sin: f32, roll_cos: f32)
     let ye = y * roll_cos;
     let pitch_component = pitch * px_per_degree;
 
-    let outside = x*x + y*y > (WIDTH.min(HEIGHT)/2).pow(2) as f32;
+    let outside = x * x + y * y > (WIDTH.min(HEIGHT) / 2).pow(2) as f32;
 
     let shade = if outside {
         xe > ye
@@ -385,12 +491,7 @@ impl DisplayState {
 }
 
 fn read_f32(values: &[u8]) -> f32 {
-    f32::from_le_bytes([
-        values[0],
-        values[1],
-        values[2],
-        values[3],
-    ])
+    f32::from_le_bytes([values[0], values[1], values[2], values[3]])
 }
 
 fn project_relative_point(rel_pitch: f32, rel_yaw: f32, roll: f32) -> Point {
