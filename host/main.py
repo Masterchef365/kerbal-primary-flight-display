@@ -13,15 +13,38 @@ conn = krpc.connect(
 
 ser = serial.Serial("/dev/ttyACM0", baudrate=115200)
 
-vessel = conn.space_center.active_vessel
+while True:
+    try:
+        vessel = conn.space_center.active_vessel
+    except:
+        print("Waiting for vessel...")
+        time.sleep(1)
+        continue
+    break
+
 flight_info = vessel.flight()
+flight_info.velocity
 altitude = conn.add_stream(getattr, flight_info, 'mean_altitude')
 pitch = conn.add_stream(getattr, flight_info, 'pitch')
 roll = conn.add_stream(getattr, flight_info, 'roll')
-speed = conn.add_stream(getattr, flight_info, 'speed')
 heading = conn.add_stream(getattr, flight_info, 'heading')
+true_air_speed = conn.add_stream(getattr, flight_info, 'true_air_speed')
+orbital_speed = conn.add_stream(
+    getattr,
+    vessel.orbit,
+    'speed'
+)
 
 while True:
+    obt_speed = orbital_speed()
+    air_speed = true_air_speed()
+
+    true_speed = -1.0
+    if air_speed > 0.0:
+        true_speed = air_speed
+    else:
+        true_speed = obt_speed
+
     bytes = struct.pack(
         '4B5f',
         0x00,
@@ -31,7 +54,7 @@ while True:
         pitch(),
         roll(),
         altitude(),
-        speed(),
+        true_speed,
         heading()
     )
 

@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -246,9 +247,31 @@ fn main() -> ! {
             .draw(&mut back_buffer)
             .unwrap();
 
+        // Draw 'wings'
+        Line::new(
+            Point::new(center.x - 30, center.y),
+            Point::new(center.x - 50, center.y),
+        )
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::YELLOW, 2))
+        .draw(&mut back_buffer)
+        .unwrap();
+
+        Line::new(
+            Point::new(center.x + 30, center.y),
+            Point::new(center.x + 50, center.y),
+        )
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::YELLOW, 2))
+        .draw(&mut back_buffer)
+        .unwrap();
+
+
         // Speed tape background
-        let speed_tape_tl = Point::new(center.x - WIDTH as i32 / 3, center.y);
+        let margin = 5;
         let speed_tape_sz = Size::new(WIDTH as u32 / 6, 5 * HEIGHT as u32 / 6);
+        let speed_tape_tl = Point::new(
+            center.x - WIDTH as i32 / 3 - speed_tape_sz.width as i32 / 2,
+            center.y,
+        );
 
         let dark_rect = Rectangle::new(
             Point::new(
@@ -265,7 +288,7 @@ fn main() -> ! {
 
         // Speed background
         let triangle_width = 5;
-        let speed_bkg_sz = Size::new(speed_tape_sz.width, 22);
+        let speed_bkg_sz = Size::new(speed_tape_sz.width - triangle_width, 22);
         let black_rect = Rectangle::new(
             Point::new(
                 speed_tape_tl.x - speed_bkg_sz.width as i32 / 2,
@@ -276,10 +299,10 @@ fn main() -> ! {
         black_rect
             .draw_styled(&PrimitiveStyle::with_fill(Rgb565::BLACK), &mut back_buffer)
             .unwrap();
-        
+
         let br = black_rect.bottom_right().unwrap();
         let tr = Point::new(br.x, black_rect.top_left.y);
-        let middle = Point::new(br.x + 5, (br.y + tr.y) / 2);
+        let middle = Point::new(br.x + triangle_width as i32, (br.y + tr.y) / 2);
 
         Triangle::new(br, tr, middle)
             .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
@@ -287,14 +310,17 @@ fn main() -> ! {
             .unwrap();
 
         // Draw speed
-        let speed_text = current_state.speed.round().to_string();
+        let speed_text = format_bignumber(current_state.speed, false);
         Text::with_alignment(&speed_text, speed_tape_tl, large_style, Alignment::Center)
             .draw(&mut back_buffer)
             .unwrap();
 
         // Altitude tape background
-        let alt_tape_tl = Point::new(center.x + WIDTH as i32 / 3, center.y);
         let alt_tape_sz = Size::new(WIDTH as u32 / 6, 5 * HEIGHT as u32 / 6);
+        let alt_tape_tl = Point::new(
+            center.x + WIDTH as i32 / 3 + alt_tape_sz.width as i32 / 2,
+            center.y,
+        );
 
         let dark_rect = Rectangle::new(
             Point::new(
@@ -309,11 +335,34 @@ fn main() -> ! {
             }
         }
 
+        // Altitude tape numbers
+        let (_, quant) = quant_bignumber(current_state.altitude);
+        let unit = quant * 100.0;
+        let rounded_alt = (current_state.altitude / unit).round() * unit;
+        let remainder_alt = current_state.altitude % unit;
+
+        let n: i32 = 2;
+        let total = n * 2 + 1;
+        let px_per_unit: f32 = alt_tape_sz.height as f32 / total as f32 / unit;
+
+        for i in -n..=n {
+            let offset_alt = i as f32 * unit;
+            let combined_alt = rounded_alt + offset_alt;
+            if combined_alt < 0.0 {
+                continue;
+            }
+            let text_pos = Point::new(alt_tape_tl.x, center.y - ((offset_alt - remainder_alt) * px_per_unit).floor() as i32);
+            let text = format_bignumber(combined_alt, true);
+            Text::with_alignment(&text, text_pos, large_style, Alignment::Center)
+                .draw(&mut back_buffer)
+                .unwrap();
+        }
+
         // Altitude background
         let alt_bkg_sz = Size::new(alt_tape_sz.width - triangle_width, 22);
         let black_rect = Rectangle::new(
             Point::new(
-                alt_tape_tl.x - alt_bkg_sz.width as i32 / 2,
+                alt_tape_tl.x - alt_bkg_sz.width as i32 / 2 + triangle_width as i32,
                 alt_tape_tl.y - alt_bkg_sz.height as i32 / 2,
             ),
             alt_bkg_sz,
@@ -321,22 +370,21 @@ fn main() -> ! {
         black_rect
             .draw_styled(&PrimitiveStyle::with_fill(Rgb565::BLACK), &mut back_buffer)
             .unwrap();
-        
-        let br = black_rect.bottom_right().unwrap();
-        let tr = Point::new(br.x, black_rect.top_left.y);
-        let middle = Point::new(br.x - 5, (br.y + tr.y) / 2);
 
-        Triangle::new(br, tr, middle)
+        let tl = black_rect.top_left;
+        let bl = Point::new(tl.x, black_rect.bottom_right().unwrap().y);
+        let middle = Point::new(tl.x - triangle_width as i32, (bl.y + tl.y) / 2);
+
+        Triangle::new(bl, tl, middle)
             .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
             .draw(&mut back_buffer)
             .unwrap();
 
         // Draw altitude
-        let alt_text = current_state.altitude.round().to_string();
-        Text::with_alignment(&alt_text, alt_tape_tl, large_style, Alignment::Right)
+        let alt_text = format_bignumber(current_state.altitude, false);
+        Text::with_alignment(&alt_text, alt_tape_tl, large_style, Alignment::Center)
             .draw(&mut back_buffer)
             .unwrap();
-
 
         // Draw only those tiles which changed
         let s = TILE_SIZE;
@@ -392,9 +440,9 @@ fn main() -> ! {
 
         frame_num += 1;
 
-        let elap = frame_start.elapsed();
-        let ms = elap.as_millis();
-        let hz = 1000.0 / ms as f32;
+        //let elap = frame_start.elapsed();
+        //let ms = elap.as_millis();
+        //let hz = 1000.0 / ms as f32;
         //esp_println::println!("{ms} ms = {hz} Hz");
 
         //display.clear(Rgb565::RED).unwrap();
@@ -510,4 +558,25 @@ fn project_line(rel_pitch: f32, size: f32, roll: f32) -> Line {
         project_relative_point(rel_pitch, -size, roll),
         project_relative_point(rel_pitch, size, roll),
     )
+}
+
+fn quant_bignumber(value: f32) -> (&'static str, f32) {
+    if value > 1e2 * 1e9 {
+        ("G", 1e9)
+    } else if value > 1e2 * 1e6 {
+        ("M", 1e6)
+    } else if value > 1e2 * 1e3 {
+        ("k", 1e3)
+    } else {
+        ("", 1.0)
+    }
+}
+
+fn format_bignumber(mut value: f32, round: bool) -> String {
+    let (unit, quant) = quant_bignumber(value);
+
+    if round {
+        value = (value / quant / 100.0).floor() * 100.0;
+    }
+    format!("{value:5}{unit}")
 }
