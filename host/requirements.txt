@@ -1,0 +1,6 @@
+future==1.0.0
+iso8601==2.1.0
+krpc==0.5.4
+protobuf==7.35.0
+pyserial==3.5
+PyYAML==6.0.3
